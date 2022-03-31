@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to Create Lambda with cross account access to timestream
+
+Resources:
+  CrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaExecutionRole
+      Description: Role to for lambda
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: EmbeddedInlinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 'logs:*'
+                Resource: '*'
+              - Effect: Allow
+                Action: 'sts:AssumeRole'
+                Resource: 'arn:aws:iam::827706604552:role/CrossAccountLambdaAccess'
+              - Effect: Allow
+                Action: 'timestream:*'
+                Resource: '*'
+  SampleLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs12.x
+      Role: !GetAtt CrossAccountRole.Arn
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          var aws = require('aws-sdk')
+          exports.handler = function(event, context) {
+              console.log("REQUEST RECEIVED:\n" + JSON.stringify(event))
+              var sts = new aws.STS();
+              var sts_params = {
+                RoleArn: "arn:aws:iam::827706604552:role/CrossAccountLambdaAccess",
+                RoleSessionName: "ThisCanBeAnyName"
+              };
+              sts.assumeRole(sts_params, function (err, data) {
+                if(!err){
+                  aws.config.credentials = new aws.TemporaryCredentials({RoleArn: sts_params.RoleArn});
+                  var client = new aws.TimestreamWrite();
+                  var params = {
+                    MaxResults: 5
+                  };
+                  client.listDatabases(params, function(err, data) {
+                    console.log(data);
+                  });
+                }
+              })
+          }
+      Description: Test timestream crossaccount creation
+      TracingConfig:
+        Mode: Active
